@@ -1,24 +1,54 @@
-import os
-from constants import *
-from web3 import Web3
-from dotenv import load_dotenv
-from web3.middleware import geth_poa_middleware
-from web3.gas_strategies.time_based import medium_gas_price_strategy
-from eth_account import Account
-from bit import Key
-from bit import PrivateKeyTestnet
-from bit.network import NetworkAPI
 import subprocess
 import json
+import os
+from constants import BTC, BTCTEST, ETH
+from pprint import pprint
+from bit import PrivateKeyTestnet
+from bit.network import NetworkAPI
+from web3 import Web3, middleware, Account
+from web3.gas_strategies.time_based import medium_gas_price_strategy
+from web3.middleware import geth_poa_middleware
 
-load_dotenv()
-mnemonic = os.getenv('MNEMONIC', 'review duck utility honey bike discover friend fat trophy injury matter buffalo')
+# connect Web3
+w3 = Web3(Web3.HTTPProvider(os.getenv('WEB3_PROVIDER', 'http://localhost:8545')))
 
-w3 = Web3(Web3.HTTPProvider("http://127.0.0.1:8545"))
-w3.middleware_onion.inject(geth_poa_middleware, layer=0)
+# enable PoA middleware
+w3.middleware_stack.inject(geth_poa_middleware, layer=0)
+
+# set gas price strategy to built-in "medium" algorithm (est ~5min per tx)
+# see https://web3py.readthedocs.io/en/stable/gas_price.html?highlight=gas
+
+# see https://ethgasstation.info/ API for a more accurate strategy
 w3.eth.setGasPriceStrategy(medium_gas_price_strategy)
 
-def derive_wallets(coin, mnemonic, depth):
+# including a mnemonic with prefunded test tokens for testing
+mnemonic = os.getenv("MNEMONIC", "import subprocess
+
+import json
+import os
+from constants import BTC, BTCTEST, ETH
+from pprint import pprint
+from bit import PrivateKeyTestnet
+from bit.network import NetworkAPI
+from web3 import Web3, middleware, Account
+from web3.gas_strategies.time_based import medium_gas_price_strategy
+from web3.middleware import geth_poa_middleware
+
+# connect Web3
+w3 = Web3(Web3.HTTPProvider(os.getenv('WEB3_PROVIDER', 'http://localhost:8545')))
+
+# enable PoA middleware
+w3.middleware_stack.inject(geth_poa_middleware, layer=0)
+
+# set gas price strategy to built-in "medium" algorithm (est ~5min per tx)
+# see https://web3py.readthedocs.io/en/stable/gas_price.html?highlight=gas
+# see https://ethgasstation.info/ API for a more accurate strategy
+w3.eth.setGasPriceStrategy(medium_gas_price_strategy)
+
+# including a mnemonic with prefunded test tokens for testing
+mnemonic = os.getenv("MNEMONIC", "review duck utility honey bike discover friend fat trophy injury matter buffalo")
+
+def derive_wallets(coin=BTC, mnemonic=mnemonic, depth=3):
     p = subprocess.Popen(
         f"./derive -g --mnemonic='{mnemonic}' --coin={coin} --numderive={depth} --format=json",
         stdout=subprocess.PIPE,
@@ -27,38 +57,85 @@ def derive_wallets(coin, mnemonic, depth):
     p_status = p.wait()
     return json.loads(output)
 
-def priv_key_to_account(coin,priv_key):
-
-    if (coin==BTCTEST):
-        return PrivateKeyTestnet(priv_key)
-    else :
+def priv_key_to_account(coin, priv_key):
+    if coin == ETH:
         return Account.privateKeyToAccount(priv_key)
-
-def create_raw_tx(account, recipient, amount):
-    gasEstimate = w3.eth.estimateGas(
-        {"from": account.address, "to": recipient, "value": amount}
-    )
-    return {
-        "from": account.address,
-        "to": recipient,
-        "value": amount,
-        "gasPrice": w3.eth.gasPrice,
-        "gas": gasEstimate,
-        "nonce": w3.eth.getTransactionCount(account.address),
-    }
+    if coin == BTCTEST:
+        return PrivateKeyTestnet(priv_key)
 
 def create_tx(coin, account, to, amount):
-    if (coin==ETH):
-        return create_raw_tx(account,to,amount)
-    else:
+    if coin == ETH:
+        value = w3.toWei(amount, "ether") # convert 1.2 ETH to 120000000000 wei
+        gasEstimate = w3.eth.estimateGas({ "to": to, "from": account.address, "amount": value })
+        return {
+            "to": to,
+            "from": account.address,
+            "value": value,
+            "gas": gasEstimate,
+            "gasPrice": w3.eth.generateGasPrice(),
+            "nonce": w3.eth.getTransactionCount(account.address),
+            "chainId": w3.net.chainId
+        }
+    if coin == BTCTEST:
         return PrivateKeyTestnet.prepare_transaction(account.address, [(to, amount, BTC)])
 
-def send_tx(coin, account, recipient, amount):
-    tx = create_tx(coin,account, recipient, amount)
-    signed_tx = account.sign_transaction(tx)
-    result=None
-    if(coin==ETH):
-        result = w3.eth.sendRawTransaction(signed_tx.rawTransaction)
-    else:
-        result=NetworkAPI.broadcast_tx_testnet(signed_tx)
-    return result
+def send_tx(coin, account, to, amount):
+    if coin == ETH:
+        raw_tx = create_tx(coin, account, to, amount)
+        signed = account.signTransaction(raw_tx)
+        return w3.eth.sendRawTransaction(signed.rawTransaction)
+    if coin == BTCTEST:
+        raw_tx = create_tx(coin, account, to, amount)
+        signed = account.sign_transaction(raw_tx)
+        return NetworkAPI.broadcast_tx_testnet(signed)
+coins = {
+    ETH: derive_wallets(coin=ETH),
+    BTCTEST: derive_wallets(coin=BTCTEST),
+}
+pprint(coins)")
+
+def derive_wallets(coin=BTC, mnemonic=mnemonic, depth=3):
+    p = subprocess.Popen(
+        f"./derive -g --mnemonic='{mnemonic}' --coin={coin} --numderive={depth} --format=json",
+        stdout=subprocess.PIPE,
+        shell=True)
+    (output, err) = p.communicate()
+    p_status = p.wait()
+    return json.loads(output)
+
+def priv_key_to_account(coin, priv_key):
+    if coin == ETH:
+        return Account.privateKeyToAccount(priv_key)
+    if coin == BTCTEST:
+        return PrivateKeyTestnet(priv_key)
+
+def create_tx(coin, account, to, amount):
+    if coin == ETH:
+        value = w3.toWei(amount, "ether") # convert 1.2 ETH to 120000000000 wei
+        gasEstimate = w3.eth.estimateGas({ "to": to, "from": account.address, "amount": value })
+        return {
+            "to": to,
+            "from": account.address,
+            "value": value,
+            "gas": gasEstimate,
+            "gasPrice": w3.eth.generateGasPrice(),
+            "nonce": w3.eth.getTransactionCount(account.address),
+            "chainId": w3.net.chainId
+        }
+    if coin == BTCTEST:
+        return PrivateKeyTestnet.prepare_transaction(account.address, [(to, amount, BTC)])
+
+def send_tx(coin, account, to, amount):
+    if coin == ETH:
+        raw_tx = create_tx(coin, account, to, amount)
+        signed = account.signTransaction(raw_tx)
+        return w3.eth.sendRawTransaction(signed.rawTransaction)
+    if coin == BTCTEST:
+        raw_tx = create_tx(coin, account, to, amount)
+        signed = account.sign_transaction(raw_tx)
+        return NetworkAPI.broadcast_tx_testnet(signed)
+coins = {
+    ETH: derive_wallets(coin=ETH),
+    BTCTEST: derive_wallets(coin=BTCTEST),
+}
+pprint(coins)
